@@ -1,0 +1,21 @@
+{
+  "name": "知食分子",
+  "short_name": "知食分子",
+  "description": "少一点决策，多一点了解。",
+  "id": "/",
+  "start_url": "/?source=pwa",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#FBF9F4",
+  "theme_color": "#7D9B76",
+  "orientation": "portrait",
+  "categories": ["food", "health", "lifestyle", "productivity"],
+  "icons": [
+    {
+      "src": "./assets/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

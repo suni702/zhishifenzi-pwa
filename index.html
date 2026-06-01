@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#7D9B76" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-title" content="知食分子" />
+    <title>知食分子</title>
+    <link rel="manifest" href="./manifest.webmanifest" />
+    <link rel="icon" href="./assets/icon.svg" type="image/svg+xml" />
+    <link rel="apple-touch-icon" href="./assets/icon.svg" />
+    <link rel="stylesheet" href="./styles.css?v=20260601i" />
+  </head>
+  <body>
+    <main id="app" aria-live="polite"></main>
+
+    <input id="assistantImageInput" class="visually-hidden" type="file" accept="image/*" multiple />
+    <input id="fridgePhotoInput" class="visually-hidden" type="file" accept="image/*" capture="environment" />
+    <input id="orderImageInput" class="visually-hidden" type="file" accept="image/*" multiple />
+
+    <script src="./app.js?v=20260601i" defer></script>
+  </body>
+</html>

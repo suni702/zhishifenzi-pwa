@@ -1,0 +1,21 @@
+services:
+  - type: web
+    name: zhishifenzi-pwa
+    runtime: node
+    plan: free
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /api/health
+    envVars:
+      - key: HOST
+        value: 0.0.0.0
+      - key: NODE_ENV
+        value: production
+      - key: ARK_MODEL
+        value: deepseek-v3-2-251201
+      - key: ARK_ENDPOINT
+        value: https://ark.cn-beijing.volces.com/api/v3/responses
+      - key: ARK_WEB_SEARCH
+        value: "false"
+      - key: ARK_API_KEY
+        sync: false

@@ -1,0 +1,15 @@
+{
+  "name": "zhishifenzi-pwa",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "知食分子 PWA：本地优先的个人饮食决策与记忆助手。",
+  "scripts": {
+    "start": "node server.mjs",
+    "dev": "PORT=4173 node server.mjs",
+    "check": "node --check server.mjs && node --check app.js && node --check sw.js"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
