@@ -2,6 +2,10 @@ const STORAGE_KEY = "zhishifenzi-pwa-v3";
 const AUTH_DAYS = 30;
 const DEMO_CODE = "123456";
 let deferredInstallPrompt = null;
+let speechRecognition = null;
+let voiceTranscript = "";
+let lastShakeAt = 0;
+let shakeListenerReady = false;
 
 const cuisineOptions = [
   ["🥘", "粤菜"],
@@ -125,6 +129,31 @@ const recipeSeed = [
   }
 ];
 
+const indulgenceSeed = [
+  {
+    id: "sample-burger",
+    emoji: "🍔",
+    name: "芝士汉堡",
+    estimatedCalories: 850,
+    location: "收藏示例",
+    tags: ["汉堡", "芝士", "牛肉"],
+    description: "面包松软，肉饼多汁。留给想认真犒劳自己的那天。",
+    image: "",
+    createdAt: 0
+  },
+  {
+    id: "sample-tiramisu",
+    emoji: "🍰",
+    name: "提拉米苏",
+    estimatedCalories: 420,
+    location: "收藏示例",
+    tags: ["甜品", "咖啡", "奶油"],
+    description: "入口即化，不太甜。它不参与日常推荐，但值得被记住。",
+    image: "",
+    createdAt: 0
+  }
+];
+
 const fallbackState = {
   phase: "welcome",
   onboardingStep: 1,
@@ -141,6 +170,16 @@ const fallbackState = {
     crave: false
   },
   recipeShuffle: 0,
+  voiceMode: false,
+  voiceRecording: false,
+  shakeEnabled: true,
+  shakeHintSeen: false,
+  archiveOpen: {
+    fridge: false,
+    inspirations: false,
+    indulgence: false,
+    dna: false
+  },
   manageFridge: false,
   selectedFridgeIds: [],
   modal: null,
@@ -198,6 +237,7 @@ const fallbackState = {
   chat: [],
   scans: [],
   inspirations: [],
+  indulgences: [],
   memory: [],
   feedbackLog: [],
   lastRecipeId: "onion-egg-rice",
@@ -212,6 +252,10 @@ document.addEventListener("click", handleClick);
 document.addEventListener("input", handleInput);
 document.addEventListener("submit", handleSubmit);
 document.addEventListener("change", handleFileChange);
+document.addEventListener("pointerdown", handlePointerDown);
+document.addEventListener("pointerup", handlePointerUp);
+document.addEventListener("pointercancel", handlePointerUp);
+document.addEventListener("visibilitychange", stopVoiceRecognition);
 window.addEventListener("beforeinstallprompt", (event) => {
   event.preventDefault();
   deferredInstallPrompt = event;
@@ -247,7 +291,8 @@ function normalizeState(raw) {
   merged.auth = { ...base.auth, ...(raw.auth || {}) };
   merged.onboarding = { ...base.onboarding, ...(raw.onboarding || {}) };
   merged.recipeFilters = { ...base.recipeFilters, ...(raw.recipeFilters || {}) };
-  for (const key of ["fridge", "meals", "chat", "scans", "inspirations", "memory", "selectedFridgeIds", "feedbackLog"]) {
+  merged.archiveOpen = { ...base.archiveOpen, ...(raw.archiveOpen || {}) };
+  for (const key of ["fridge", "meals", "chat", "scans", "inspirations", "indulgences", "memory", "selectedFridgeIds", "feedbackLog"]) {
     merged[key] = Array.isArray(raw[key]) ? raw[key] : base[key];
   }
   if (!["welcome", "onboarding", "journey", "app"].includes(merged.phase)) merged.phase = "welcome";
@@ -280,7 +325,15 @@ function attr(value = "") {
   return escapeHTML(value);
 }
 
+function formatMessageText(value = "") {
+  return escapeHTML(value)
+    .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
+    .replace(/\n{3,}/g, "\n\n")
+    .replace(/\n/g, "<br />");
+}
+
 function render() {
+  document.body.classList.toggle("voice-recording-active", Boolean(state.voiceRecording));
   if (state.phase === "welcome") {
     app.innerHTML = renderWelcome();
     return;
@@ -302,6 +355,7 @@ function render() {
       if (view) view.scrollTop = view.scrollHeight;
     });
   }
+  setupShakeListener();
 }
 
 function renderWelcome() {
@@ -624,11 +678,12 @@ function renderAssistantTab() {
 }
 
 function renderMessage(message) {
+  const textHtml = message.text ? `<div class="message-text">${formatMessageText(message.text)}</div>` : "";
   return `
     <div class="message-row ${message.role}">
       <div class="bubble">
         ${message.image ? `<img class="message-image" alt="用户上传的图片" src="${attr(message.image)}" />` : ""}
-        ${message.text ? escapeHTML(message.text) : ""}
+        ${textHtml}
         ${message.recommendation ? renderRecommendCard(message.recommendation) : ""}
         ${message.feedbackPrompt ? renderFeedbackPrompt(message.feedbackPrompt) : ""}
         ${message.undoMealId ? `<div class="card-actions"><button class="secondary-button" type="button" data-action="undo-meal" data-id="${attr(message.undoMealId)}">撤销</button></div>` : ""}
@@ -668,9 +723,22 @@ function renderFeedbackPrompt(prompt) {
 }
 
 function renderComposer() {
+  if (state.voiceMode) {
+    return `
+      <form class="assistant-composer voice-composer" id="textComposer">
+        <button class="tool-icon" type="button" data-action="toggle-voice-mode" aria-label="切换到键盘">⌨️</button>
+        <button class="hold-voice-button ${state.voiceRecording ? "recording" : ""}" type="button" data-action="hold-voice" aria-label="按住说话">
+          ${state.voiceRecording ? "松开发送" : "按住说话"}
+        </button>
+        <button class="tool-icon" type="button" data-action="open-camera" aria-label="拍照上传">📷</button>
+        <button class="tool-icon" type="button" data-action="open-image" aria-label="图片上传">🖼️</button>
+      </form>
+      ${state.voiceRecording ? `<div class="recording-tip">正在听，松开发送</div>` : ""}
+    `;
+  }
   return `
     <form class="assistant-composer" id="textComposer">
-      <button class="tool-icon" type="button" data-action="open-voice" aria-label="语音输入">🎤</button>
+      <button class="tool-icon" type="button" data-action="toggle-voice-mode" aria-label="切换到语音">🎤</button>
       <input class="text-composer-input" name="message" autocomplete="off" placeholder="和小知说点什么..." />
       <button class="tool-icon" type="button" data-action="open-image" aria-label="图片上传">🖼️</button>
       <button class="send-mini-button" type="submit" aria-label="发送">发送</button>
@@ -700,75 +768,110 @@ function renderBottomTabs() {
 function renderArchiveTab() {
   return `
     <section class="tab-panel active">
-      <section class="section">
-        <div class="section-title">
-          <h2>🧊 我的冰箱</h2>
-          <button class="text-button" type="button" data-action="toggle-fridge-manage">${state.manageFridge ? "完成" : "管理"}</button>
-        </div>
-        <div class="fridge-strip">
-          ${state.fridge.length ? state.fridge.map(renderIngredientCard).join("") : `<div class="empty-state">冰箱还空着。拍照、上传小票，或直接说“冰箱有鸡蛋 3 个”。</div>`}
-        </div>
-        <div class="hint-line">➔ 左右滑动查看更多</div>
-        <div class="inline-actions">
-          <button class="primary-button" type="button" data-action="open-fridge-photo">📷 拍照入库</button>
-          <button class="primary-button" type="button" data-action="open-order-upload">📋 图片入库</button>
-        </div>
-        ${state.manageFridge ? `<button class="danger-button" type="button" data-action="delete-selected-fridge" style="width:100%;margin-top:12px;">删除选中</button>` : ""}
-      </section>
-
-      <section class="section">
-        <div class="section-title"><h2>💡 方案灵感库</h2></div>
-        <div class="inspiration-toolbar">
-          <button class="filter-summary" type="button" data-action="open-filter">🔍 ${escapeHTML(filterSummary())}</button>
-          <button class="round-tool ${state.recipeFilters.crave ? "active" : ""}" type="button" data-action="toggle-crave" aria-label="一键解馋">🌙</button>
-          <button class="round-tool" type="button" data-action="shuffle-recipes" aria-label="换一批">🔀</button>
-        </div>
-        ${filteredRecipes().length ? `
-          <div class="recipe-grid recipe-grid-animated" style="margin-top:12px;">
-            ${filteredRecipes().map(renderRecipeCard).join("")}
-          </div>
-          <div class="hint-line" style="margin-top:10px;">➔ 下滑加载更多</div>
-        ` : `
-          <div class="empty-state">😕 没有符合条件的灵感
-            <div class="card-actions">
-              <button class="secondary-button" type="button" data-action="reset-filter">重置筛选</button>
-              <button class="primary-button" type="button" data-action="ask-xiaozhi">去问小知</button>
-            </div>
-          </div>
-        `}
-      </section>
-
-      <section class="section">
-        <div class="section-title">
-          <h2>🧬 口味DNA</h2>
-          <button class="text-button" type="button" data-action="edit-profile">调整偏好</button>
-        </div>
-        <div class="panel-card">
-          ${renderCuisineBars()}
-          <div style="height:14px;"></div>
-          <strong>口味标签</strong>
-          <div class="chip-cloud" style="margin-top:8px;">
-            ${profileTastes().map((tag) => `<button class="tag-chip" type="button" data-action="remove-taste" data-value="${attr(tag)}">${escapeHTML(tag)} ×</button>`).join("")}
-            <button class="tag-chip ghost-button" type="button" data-action="edit-profile">+ 添加</button>
-          </div>
-          <div style="height:16px;"></div>
-          <strong>高频食材</strong>
-          <div class="word-cloud">${frequentIngredients().map((word) => `<span>${escapeHTML(word)}</span>`).join("")}</div>
-          <div class="habit-card">
-            <strong>🕐 深夜饮食习惯</strong>
-            <p>偏好热量：&lt;150千卡<br />偏好类型：${escapeHTML((state.profile.lateNightPrefs || []).join("、") || "汤羹、凉拌")}<br />频率：${escapeHTML(state.profile.lateNight || "还在观察")}</p>
-            <br />
-            <strong>📅 周末烹饪习惯</strong>
-            <p>偏好类型：${escapeHTML(state.profile.mealTime || "快手优先")}<br />常用菜系：${escapeHTML(profileCuisines().slice(0, 2).join("、") || "粤菜、日料")}<br />平均耗时：${escapeHTML(averageMealTime())}</p>
-          </div>
-          <div style="height:16px;"></div>
-          <strong>饱腹感档案</strong>
-          <div class="habit-card satiety-card">
-            ${renderSatietyProfile()}
-          </div>
-        </div>
-      </section>
+      ${renderArchiveRoom("fridge", "🧊", "我的冰箱", fridgeSummary(), renderFridgeRoom())}
+      ${renderArchiveRoom("inspirations", "💡", "方案灵感库", `${filteredRecipes().length} 个可选 · ${filterSummary()}`, renderInspirationRoom())}
+      ${renderArchiveRoom("indulgence", "💝", "口腹之欲", `${indulgences().length} 个收藏 · 不参与日常推荐`, renderIndulgenceRoom())}
+      ${renderArchiveRoom("dna", "🧬", "口味DNA", dnaSummary(), renderDnaRoom())}
     </section>
+  `;
+}
+
+function renderArchiveRoom(key, icon, title, summary, content) {
+  const open = Boolean(state.archiveOpen?.[key]);
+  return `
+    <section class="archive-room ${open ? "open" : ""}">
+      <button class="archive-room-head" type="button" data-action="toggle-archive-room" data-room="${attr(key)}">
+        <span class="room-icon">${icon}</span>
+        <span><strong>${escapeHTML(title)}</strong><small>${escapeHTML(summary)}</small></span>
+        <span class="room-chevron">${open ? "⌃" : "⌄"}</span>
+      </button>
+      ${open ? `<div class="archive-room-body">${content}</div>` : ""}
+    </section>
+  `;
+}
+
+function renderFridgeRoom() {
+  return `
+    <div class="section-title compact-title">
+      <span></span>
+      <button class="text-button" type="button" data-action="toggle-fridge-manage">${state.manageFridge ? "完成" : "管理"}</button>
+    </div>
+    <div class="fridge-strip">
+      ${state.fridge.length ? state.fridge.map(renderIngredientCard).join("") : `<div class="empty-state compact">冰箱还空着。拍照、上传小票，或直接说“冰箱有鸡蛋 3 个”。</div>`}
+    </div>
+    <div class="inline-actions">
+      <button class="primary-button" type="button" data-action="open-fridge-photo">📷 拍照入库</button>
+      <button class="primary-button" type="button" data-action="open-order-upload">🖼️ 图片入库</button>
+    </div>
+    ${state.manageFridge ? `<button class="danger-button" type="button" data-action="delete-selected-fridge" style="width:100%;margin-top:10px;">删除选中</button>` : ""}
+  `;
+}
+
+function renderInspirationRoom() {
+  return `
+    <p class="room-tip">${state.shakeHintSeen ? "筛选、换一批，或者交给小知。" : "拿不准？手机上摇一摇帮你决定。"}</p>
+    <div class="inspiration-toolbar">
+      <button class="filter-summary" type="button" data-action="open-filter">🔍 ${escapeHTML(filterSummary())}</button>
+      <button class="round-tool ${state.recipeFilters.crave ? "active" : ""}" type="button" data-action="toggle-crave" aria-label="一键解馋">🌙</button>
+      <button class="round-tool" type="button" data-action="shuffle-recipes" aria-label="换一批">🔀</button>
+    </div>
+    ${filteredRecipes().length ? `
+      <div class="recipe-grid recipe-grid-animated" style="margin-top:12px;">
+        ${filteredRecipes().slice(0, 6).map(renderRecipeCard).join("")}
+      </div>
+    ` : `
+      <div class="empty-state compact">😕 没有符合条件的灵感
+        <div class="card-actions">
+          <button class="secondary-button" type="button" data-action="reset-filter">重置筛选</button>
+          <button class="primary-button" type="button" data-action="ask-xiaozhi">去问小知</button>
+        </div>
+      </div>
+    `}
+  `;
+}
+
+function renderIndulgenceRoom() {
+  const items = indulgences();
+  return `
+    <div class="section-title compact-title">
+      <span></span>
+      <button class="text-button" type="button" data-action="open-subpage" data-page="indulgence">查看全部</button>
+    </div>
+    <div class="indulgence-strip">
+      ${items.slice(0, 6).map(renderIndulgenceMiniCard).join("")}
+    </div>
+    <div class="inline-actions">
+      <button class="secondary-button" type="button" data-action="open-indulgence-form">✍️ 手动添加</button>
+      <button class="primary-button" type="button" data-action="open-indulgence-camera">📷 拍照收藏</button>
+    </div>
+  `;
+}
+
+function renderDnaRoom() {
+  return `
+    <div class="section-title compact-title">
+      <span></span>
+      <button class="text-button" type="button" data-action="edit-profile">调整偏好</button>
+    </div>
+    <div class="panel-card flat-card">
+      ${renderCuisineBars()}
+      <div style="height:14px;"></div>
+      <strong>口味标签</strong>
+      <div class="chip-cloud" style="margin-top:8px;">
+        ${profileTastes().map((tag) => `<button class="tag-chip" type="button" data-action="remove-taste" data-value="${attr(tag)}">${escapeHTML(tag)} ×</button>`).join("")}
+        <button class="tag-chip ghost-button" type="button" data-action="edit-profile">+ 添加</button>
+      </div>
+      <div style="height:16px;"></div>
+      <strong>高频食材</strong>
+      <div class="word-cloud">${frequentIngredients().map((word) => `<span>${escapeHTML(word)}</span>`).join("")}</div>
+      <div class="habit-card">
+        <strong>🕐 深夜饮食习惯</strong>
+        <p>偏好热量：&lt;150千卡<br />偏好类型：${escapeHTML((state.profile.lateNightPrefs || []).join("、") || "汤羹、凉拌")}<br />频率：${escapeHTML(state.profile.lateNight || "还在观察")}</p>
+        <br />
+        <strong>饱腹感档案</strong>
+        ${renderSatietyProfile()}
+      </div>
+    </div>
   `;
 }
 
@@ -798,6 +901,32 @@ function renderRecipeCard(recipe) {
       <p class="${status.ready ? "ready" : "missing"}">${escapeHTML(status.label)}</p>
       <p>🔥 ${recipe.calories}千卡</p>
       <span class="frequency-tag ${frequency.className}">${escapeHTML(frequency.label)}</span>
+    </button>
+  `;
+}
+
+function renderIndulgenceMiniCard(item) {
+  return `
+    <button class="indulgence-card mini" type="button" data-action="open-indulgence" data-id="${attr(item.id)}">
+      ${item.image ? `<img alt="${attr(item.name)}" src="${attr(item.image)}" />` : `<span class="indulgence-emoji">${item.emoji || "💝"}</span>`}
+      <strong>${escapeHTML(item.name)}</strong>
+      <small>🔥 ~${Number(item.estimatedCalories || 0) || "?"}千卡</small>
+      <small>📍 ${escapeHTML(item.location || "未记录")}</small>
+    </button>
+  `;
+}
+
+function renderIndulgenceListCard(item) {
+  return `
+    <button class="indulgence-card list" type="button" data-action="open-indulgence" data-id="${attr(item.id)}">
+      ${item.image ? `<img alt="${attr(item.name)}" src="${attr(item.image)}" />` : `<span class="indulgence-emoji">${item.emoji || "💝"}</span>`}
+      <span>
+        <strong>${escapeHTML(item.name)}</strong>
+        <small>🔥 ~${Number(item.estimatedCalories || 0) || "?"}千卡</small>
+        <small>📍 ${escapeHTML(item.location || "未记录")}</small>
+        <small>🏷 ${escapeHTML((item.tags || []).join(" ") || "未加标签")}</small>
+        <small>💬 ${escapeHTML(item.description || "还没有描述")}</small>
+      </span>
     </button>
   `;
 }
@@ -852,6 +981,7 @@ function renderProfileTab() {
             <span>${isStandalonePWA() ? "已作为 App 打开" : "安装到桌面"}</span>
             <small>${installHint()}</small>
           </button>
+          <p class="install-note">${installDetail()}</p>
         </div>
       </section>
       <section class="section">
@@ -898,6 +1028,9 @@ function renderProfileTab() {
         <div class="list-card">
           ${listRow("🎯", "每日热量目标", `当前：${state.profile.calorieGoal}千卡`, "calorie")}
           ${listRow("🔔", "提醒设置", "餐点提醒、临期提醒", "reminders")}
+          <button class="list-row" type="button" data-action="toggle-shake-setting">
+            <span>📳</span><strong>摇一摇推荐<small>选择困难时随机决定</small></strong><span class="list-arrow">${state.shakeEnabled ? "开" : "关"}</span>
+          </button>
           ${listRow("📤", "导出数据", "导出饮食日志为 JSON", "export")}
           ${listRow("ℹ️", "关于知食分子", "版本 1.0.0", "about")}
           <button class="list-row" type="button" data-action="reset-demo">
@@ -924,6 +1057,7 @@ function renderSubPage(page) {
     logs: "饮食日志",
     recipes: "我的菜谱",
     fridge: "冰箱管理",
+    indulgence: "口腹之欲",
     report: "营养报告",
     calorie: "每日热量目标",
     reminders: "提醒设置",
@@ -941,6 +1075,7 @@ function renderSubPage(page) {
         ${page === "logs" ? renderLogsPage() : ""}
         ${page === "recipes" ? `<section class="section"><div class="recipe-grid">${recipeSeed.map(renderRecipeCard).join("")}</div></section>` : ""}
         ${page === "fridge" ? `<section class="section"><div class="fridge-strip">${state.fridge.map(renderIngredientCard).join("")}</div><div class="inline-actions"><button class="primary-button" type="button" data-action="open-fridge-photo">📷拍照入库</button><button class="primary-button" type="button" data-action="open-order-upload">🖼️上传订单截图</button></div></section>` : ""}
+        ${page === "indulgence" ? renderIndulgencePage() : ""}
         ${page === "report" ? renderReportPage() : ""}
         ${page === "calorie" ? renderCaloriePage() : ""}
         ${page === "reminders" ? renderRemindersPage() : ""}
@@ -969,6 +1104,20 @@ function renderLogsPage() {
           <div class="card-actions"><button class="secondary-button" type="button" data-action="undo-meal" data-id="${attr(meal.id)}">撤销</button></div>
         </div>
       `).join("") : `<div class="empty-state">今天还没有饮食日志。你可以在助手里直接说“我吃了……”或点“做这个”。</div>`}
+    </section>
+  `;
+}
+
+function renderIndulgencePage() {
+  return `
+    <section class="section">
+      <div class="section-title">
+        <h2>想放纵一下时再来</h2>
+        <button class="text-button" type="button" data-action="open-indulgence-form">+ 添加</button>
+      </div>
+      <div class="indulgence-list">
+        ${indulgences().map(renderIndulgenceListCard).join("")}
+      </div>
     </section>
   `;
 }
@@ -1041,6 +1190,10 @@ function renderModal() {
   if (state.modal.type === "recipe") return renderRecipeDetail();
   if (state.modal.type === "filter") return renderFilterSheet();
   if (state.modal.type === "feeling") return renderFeelingSheet();
+  if (state.modal.type === "imageChoice") return renderImageChoiceSheet();
+  if (state.modal.type === "indulgenceForm") return renderIndulgenceForm();
+  if (state.modal.type === "indulgenceDetail") return renderIndulgenceDetail();
+  if (state.modal.type === "shake") return renderShakeModal();
   return "";
 }
 
@@ -1064,7 +1217,7 @@ function renderLoginSheet() {
           <button class="secondary-button" type="button" data-action="send-code">${codeSent ? "重新发送" : "获取验证码"}</button>
         </div>
         <button class="primary-button" style="width:100%;margin-top:16px;" type="submit">登录</button>
-        <div class="hint-line" style="margin-top:10px;">演示版验证码：123456。以后接短信服务时替换这里即可。</div>
+        <div class="hint-line" style="margin-top:10px;">演示版验证码：123456。${loginModeNote()}</div>
       </form>
     </div>
   `;
@@ -1096,6 +1249,105 @@ function renderFeelingSheet() {
           <button class="secondary-button" type="button" data-action="skip-feeling">跳过</button>
           <button class="primary-button" type="button" data-action="save-feeling">保存</button>
         </div>
+      </div>
+    </div>
+  `;
+}
+
+function renderImageChoiceSheet() {
+  return `
+    <div class="overlay" data-action="close-modal">
+      <div class="sheet compact-sheet" role="dialog" aria-modal="true">
+        <div class="sheet-header">
+          <h2>发送图片</h2>
+          <button class="close-button" type="button" data-action="close-modal">✕</button>
+        </div>
+        <div class="attachment-menu">
+          <button class="menu-item" type="button" data-action="open-camera">📷 拍照</button>
+          <button class="menu-item" type="button" data-action="open-image-picker">🖼️ 从相册选</button>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function renderIndulgenceForm() {
+  const draft = state.modal.draft || {};
+  return `
+    <div class="overlay" data-action="close-modal">
+      <form class="sheet" id="indulgenceForm" role="dialog" aria-modal="true">
+        <div class="sheet-header">
+          <h2>${state.modal.id ? "编辑口腹之欲" : "添加口腹之欲"}</h2>
+          <button class="close-button" type="button" data-action="close-modal">✕</button>
+        </div>
+        ${draft.image ? `<img class="form-preview-image" alt="已选图片" src="${attr(draft.image)}" />` : ""}
+        <label class="field">美食名称<input name="name" value="${attr(draft.name || "")}" placeholder="例如：芝士汉堡" /></label>
+        <label class="field">估算热量（可选）<input name="estimatedCalories" inputmode="numeric" value="${attr(draft.estimatedCalories || "")}" placeholder="千卡" /></label>
+        <label class="field">在哪吃的/买的<input name="location" value="${attr(draft.location || "")}" placeholder="例如：XX餐厅" /></label>
+        <label class="field">标签（可选）<input name="tags" value="${attr((draft.tags || []).join(" "))}" placeholder="汉堡 芝士 牛肉" /></label>
+        <label class="field">一句话描述（可选）<textarea name="description" rows="3" placeholder="为什么觉得好吃">${escapeHTML(draft.description || "")}</textarea></label>
+        <div class="inline-actions">
+          <button class="secondary-button" type="button" data-action="open-indulgence-camera">📷 拍照</button>
+          <button class="secondary-button" type="button" data-action="open-indulgence-upload">🖼️ 上传</button>
+        </div>
+        <button class="primary-button" style="width:100%;margin-top:14px;" type="submit">保存</button>
+      </form>
+    </div>
+  `;
+}
+
+function renderIndulgenceDetail() {
+  const item = indulgences().find((entry) => entry.id === state.modal.id) || indulgences()[0];
+  if (!item) return "";
+  return `
+    <div class="overlay" data-action="close-modal">
+      <div class="sheet" role="dialog" aria-modal="true">
+        <div class="sheet-header">
+          <h2>${escapeHTML(item.name)}</h2>
+          <button class="close-button" type="button" data-action="close-modal">✕</button>
+        </div>
+        ${item.image ? `<img class="form-preview-image" alt="${attr(item.name)}" src="${attr(item.image)}" />` : `<div class="indulgence-detail-emoji">${item.emoji || "💝"}</div>`}
+        <div class="habit-card">
+          <p>🔥 ~${Number(item.estimatedCalories || 0) || "?"}千卡</p>
+          <p>📍 ${escapeHTML(item.location || "未记录")}</p>
+          <p>🏷 ${escapeHTML((item.tags || []).join(" ") || "未加标签")}</p>
+          <p>💬 ${escapeHTML(item.description || "还没有描述")}</p>
+        </div>
+        <div class="inline-actions">
+          <button class="secondary-button" type="button" data-action="delete-indulgence" data-id="${attr(item.id)}">删除</button>
+          <button class="primary-button" type="button" data-action="edit-indulgence" data-id="${attr(item.id)}">编辑</button>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function renderShakeModal() {
+  const recipe = recipeSeed.find((item) => item.id === state.modal.recipeId) || filteredRecipes()[0];
+  const empty = state.modal.empty;
+  return `
+    <div class="overlay center" data-action="close-modal">
+      <div class="shake-panel" role="dialog" aria-modal="true">
+        ${empty ? `
+          <div class="shake-icon">😕</div>
+          <h2>没有符合条件的灵感</h2>
+          <p>试试放宽筛选，或者直接问小知。</p>
+          <div class="card-actions">
+            <button class="secondary-button" type="button" data-action="reset-filter">重置筛选</button>
+            <button class="primary-button" type="button" data-action="ask-xiaozhi">去问小知</button>
+          </div>
+        ` : `
+          <div class="shake-icon">📳</div>
+          <div class="shake-card">
+            <strong>${escapeHTML(recipe?.name || "就它了")}</strong>
+            <span>${Number(recipe?.calories || 0)}千卡</span>
+          </div>
+          <h2>${state.modal.onlyOne ? "只有一道，就它了" : "今天吃这个？"}</h2>
+          <div class="card-actions">
+            <button class="primary-button" type="button" data-action="accept-shake" data-id="${attr(recipe?.id || "")}">就它了</button>
+            <button class="secondary-button" type="button" data-action="shake-again">再摇一次</button>
+          </div>
+        `}
       </div>
     </div>
   `;
@@ -1320,8 +1572,15 @@ function handleClick(event) {
   }
   if (action === "open-insight") state.modal = { type: "insight" };
   if (action === "open-voice") state.modal = { type: "voice" };
+  if (action === "toggle-voice-mode") {
+    state.voiceMode = !state.voiceMode;
+    state.voiceRecording = false;
+    stopVoiceRecognition();
+  }
   if (action === "close-modal") state.modal = null;
-  if (action === "open-image") openFileInput("assistantImageInput");
+  if (action === "open-image") state.modal = { type: "imageChoice" };
+  if (action === "open-image-picker") openFileInput("assistantImageInput");
+  if (action === "open-camera") openFileInput("assistantCameraInput");
   if (action === "quick-voice") {
     state.modal = null;
     sendUserText(target.dataset.text);
@@ -1341,6 +1600,9 @@ function handleClick(event) {
   if (action === "toggle-fridge-manage") {
     state.manageFridge = !state.manageFridge;
     state.selectedFridgeIds = [];
+  }
+  if (action === "toggle-archive-room") {
+    state.archiveOpen[target.dataset.room] = !state.archiveOpen[target.dataset.room];
   }
   if (action === "select-fridge") toggleArray(state.selectedFridgeIds, target.dataset.id);
   if (action === "delete-selected-fridge") deleteSelectedFridge();
@@ -1367,6 +1629,22 @@ function handleClick(event) {
     state.recipeShuffle += 1;
     showToast(`✅找到${filteredRecipes().length}个`);
   }
+  if (action === "open-indulgence-form") state.modal = { type: "indulgenceForm", draft: {} };
+  if (action === "open-indulgence-camera") openFileInput("indulgencePhotoInput");
+  if (action === "open-indulgence-upload") openFileInput("indulgenceImageInput");
+  if (action === "open-indulgence") state.modal = { type: "indulgenceDetail", id: target.dataset.id };
+  if (action === "edit-indulgence") {
+    const item = indulgences().find((entry) => entry.id === target.dataset.id);
+    if (item) state.modal = { type: "indulgenceForm", id: item.id, draft: { ...item } };
+  }
+  if (action === "delete-indulgence") deleteIndulgence(target.dataset.id);
+  if (action === "accept-shake") {
+    state.modal = null;
+    state.activeTab = "assistant";
+    sendUserText(`做${recipeSeed.find((recipe) => recipe.id === target.dataset.id)?.name || "这个"}`);
+    return;
+  }
+  if (action === "shake-again") triggerShakePick(true);
   if (action === "ask-xiaozhi") {
     state.activeTab = "assistant";
     sendUserText("现在没有符合条件的灵感，帮我按现有冰箱想一个");
@@ -1393,6 +1671,10 @@ function handleClick(event) {
   if (action === "open-subpage") state.subPage = target.dataset.page;
   if (action === "close-subpage") state.subPage = "";
   if (action === "save-calorie-goal") saveCalorieGoal();
+  if (action === "toggle-shake-setting") {
+    state.shakeEnabled = !state.shakeEnabled;
+    showToast(state.shakeEnabled ? "摇一摇推荐已开启" : "摇一摇推荐已关闭");
+  }
   if (action === "export-data") exportData();
   if (action === "reset-demo") logout();
   if (action === "edit-placeholder") showToast("编辑菜谱会在下一版开放。");
@@ -1464,17 +1746,53 @@ function handleSubmit(event) {
     saveState();
     render();
   }
+  if (event.target.id === "indulgenceForm") {
+    const form = new FormData(event.target);
+    const draft = state.modal?.draft || {};
+    const item = {
+      id: state.modal?.id || uid("indulgence"),
+      emoji: draft.emoji || inferIndulgenceEmoji(form.get("name")),
+      name: form.get("name")?.trim() || "未命名美食",
+      estimatedCalories: Number(form.get("estimatedCalories")) || 0,
+      location: form.get("location")?.trim() || "",
+      tags: splitList(form.get("tags")),
+      description: form.get("description")?.trim() || "",
+      image: draft.image || "",
+      createdAt: draft.createdAt || Date.now()
+    };
+    const index = state.indulgences.findIndex((entry) => entry.id === item.id);
+    if (index >= 0) state.indulgences[index] = item;
+    else state.indulgences.unshift(item);
+    addMemory("indulgence", `收藏口腹之欲：${item.name}`);
+    state.modal = null;
+    showToast("已收藏到口腹之欲");
+    saveState();
+    render();
+  }
 }
 
 async function handleFileChange(event) {
   const target = event.target;
-  if (!["assistantImageInput", "fridgePhotoInput", "orderImageInput"].includes(target.id)) return;
+  if (!["assistantImageInput", "assistantCameraInput", "fridgePhotoInput", "orderImageInput", "indulgencePhotoInput", "indulgenceImageInput"].includes(target.id)) return;
   const images = await readFiles(target.files || []);
   target.value = "";
   if (!images.length) return;
 
-  if (target.id === "assistantImageInput") {
+  if (target.id === "assistantImageInput" || target.id === "assistantCameraInput") {
     images.slice(0, 3).forEach((image) => sendUserImage(image));
+  } else if (target.id === "indulgencePhotoInput" || target.id === "indulgenceImageInput") {
+    const image = images[0];
+    state.modal = {
+      type: "indulgenceForm",
+      draft: {
+        image,
+        name: "",
+        estimatedCalories: "",
+        location: "",
+        tags: [],
+        description: ""
+      }
+    };
   } else {
     images.forEach((image) => {
       state.scans.unshift({ id: uid("scan"), type: target.id === "orderImageInput" ? "order" : "fridge", image, createdAt: Date.now(), note: "图片导入，等待确认" });
@@ -1496,9 +1814,89 @@ function readFiles(fileList) {
   }))).then((items) => items.filter(Boolean));
 }
 
+function handlePointerDown(event) {
+  const target = event.target.closest('[data-action="hold-voice"]');
+  if (!target) return;
+  event.preventDefault();
+  startVoiceHold();
+}
+
+function handlePointerUp(event) {
+  if (!state.voiceRecording) return;
+  event.preventDefault();
+  finishVoiceHold(event.type === "pointercancel");
+}
+
+function startVoiceHold() {
+  state.voiceRecording = true;
+  voiceTranscript = "";
+  startVoiceRecognition();
+  saveState();
+  render();
+}
+
+function finishVoiceHold(cancelled = false) {
+  const text = voiceTranscript.trim();
+  state.voiceRecording = false;
+  stopVoiceRecognition();
+  saveState();
+  render();
+  if (cancelled) {
+    showToast("已取消语音");
+    return;
+  }
+  if (text) {
+    sendUserText(text);
+  } else {
+    showToast(supportsSpeechRecognition() ? "没听清，可以再按一次" : "这个浏览器不支持语音识别，先用键盘输入");
+  }
+}
+
+function supportsSpeechRecognition() {
+  return Boolean(window.SpeechRecognition || window.webkitSpeechRecognition);
+}
+
+function startVoiceRecognition() {
+  if (!supportsSpeechRecognition()) return;
+  const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+  speechRecognition = new Recognition();
+  speechRecognition.lang = "zh-CN";
+  speechRecognition.interimResults = true;
+  speechRecognition.continuous = true;
+  speechRecognition.onresult = (event) => {
+    voiceTranscript = Array.from(event.results)
+      .map((result) => result[0]?.transcript || "")
+      .join("")
+      .trim();
+  };
+  speechRecognition.onerror = () => {};
+  try {
+    speechRecognition.start();
+  } catch {
+    speechRecognition = null;
+  }
+}
+
+function stopVoiceRecognition() {
+  if (!speechRecognition) return;
+  try {
+    speechRecognition.stop();
+  } catch {}
+  speechRecognition = null;
+}
+
 function openFileInput(id) {
   state.modal = null;
-  document.querySelector(`#${id}`)?.click();
+  saveState();
+  render();
+  requestAnimationFrame(() => {
+    const input = document.querySelector(`#${id}`);
+    if (!input) {
+      showToast("这个上传入口没找到，我来修。");
+      return;
+    }
+    input.click();
+  });
 }
 
 function updateBasicPreview() {
@@ -1618,8 +2016,9 @@ function ensureChat() {
 
 function sendUserText(text) {
   state.chat.push({ id: uid("chat"), role: "user", createdAt: Date.now(), text });
+  const instantReply = buildLocalReply(text);
   const placeholderId = uid("chat");
-  state.chat.push({ id: placeholderId, role: "assistant", createdAt: Date.now(), text: "我在看。先别急，我会尽量只追问一个关键问题。" });
+  state.chat.push({ ...instantReply, id: placeholderId, fastLocal: true });
   saveState();
   render();
   resolveAssistantReply({ text, image: "" }, placeholderId);
@@ -1628,7 +2027,12 @@ function sendUserText(text) {
 function sendUserImage(image) {
   state.chat.push({ id: uid("chat"), role: "user", createdAt: Date.now(), text: "这个能做啥", image });
   const placeholderId = uid("chat");
-  state.chat.push({ id: placeholderId, role: "assistant", createdAt: Date.now(), text: "我在看这张图。看不清的地方我会先问你，不会硬猜。" });
+  state.chat.push({
+    id: placeholderId,
+    role: "assistant",
+    createdAt: Date.now(),
+    text: "我收到图片了。现在先不乱猜热量。\n\n这是食物、冰箱，还是订单截图？你补一句，我再继续。"
+  });
   state.scans.unshift({ id: uid("scan"), type: "image", image, createdAt: Date.now(), note: "待用户确认" });
   saveState();
   render();
@@ -1636,15 +2040,22 @@ function sendUserImage(image) {
 }
 
 async function resolveAssistantReply(payload, placeholderId) {
+  const existingReply = state.chat.find((item) => item.id === placeholderId);
   const localReply = payload.image ? {
     id: placeholderId,
     role: "assistant",
     createdAt: Date.now(),
     text: "我收到图片了。现在我不能可靠确认它到底是什么，所以先不乱报卡路里。\n\n你告诉我一个关键信息就行：这是食物、冰箱，还是订单截图？如果是食物，再补一句大概几人份，我再帮你估算和推荐。"
-  } : buildLocalReply(payload.text);
+  } : existingReply || {
+    id: placeholderId,
+    role: "assistant",
+    createdAt: Date.now(),
+    text: "我先记下。"
+  };
   const remoteText = await tryRemoteReply(payload);
+  if (!remoteText) return;
   const reply = { ...localReply, id: placeholderId };
-  if (remoteText) reply.text = remoteText;
+  reply.text = remoteText;
   const index = state.chat.findIndex((item) => item.id === placeholderId);
   if (index >= 0) state.chat[index] = reply;
   else state.chat.push(reply);
@@ -1656,7 +2067,7 @@ async function tryRemoteReply(payload) {
   if (!["http:", "https:"].includes(window.location.protocol)) return "";
   if (localStorage.getItem("zhishifenzi-ai-enabled") === "false") return "";
   const controller = new AbortController();
-  const timer = window.setTimeout(() => controller.abort(), 9000);
+  const timer = window.setTimeout(() => controller.abort(), 5500);
   try {
     const response = await fetch("./api/chat", {
       method: "POST",
@@ -1689,6 +2100,7 @@ async function tryRemoteReply(payload) {
 function buildLocalReply(text) {
   const clean = text.trim();
   const lower = clean.toLowerCase();
+  if (/口腹之欲|放纵|欺骗餐|收藏到口腹/.test(clean)) return indulgenceChatReply(clean);
   if (/冰箱|库存|还有|买了|入库|删|删除|扣除/.test(clean)) return inventoryReply(clean);
   if (/吃了|喝了|早餐|午餐|晚餐|夜宵|加餐|做了|好吃/.test(clean)) return mealReply(clean);
   if (/吃什么|做什么|推荐|不知道吃|外卖|能做啥/.test(clean)) return decisionReply(clean);
@@ -1769,6 +2181,27 @@ function inspirationReply(text) {
     role: "assistant",
     createdAt: Date.now(),
     text: "我先把它收进灵感库。它可以先只是“想吃的线索”，不必马上变成行动。\n\n为了以后推荐更准：你心动的是口味、热乎感、仪式感，还是省事？"
+  };
+}
+
+function indulgenceChatReply(text) {
+  if (/想吃|放纵|欺骗餐/.test(text) && !/收藏/.test(text)) {
+    const picks = indulgences().slice(0, 3);
+    return {
+      id: uid("chat"),
+      role: "assistant",
+      createdAt: Date.now(),
+      text: picks.length
+        ? `你收藏的口腹之欲里有：\n${picks.map((item) => `${item.emoji || "💝"} ${item.name} · ~${item.estimatedCalories || "?"}千卡`).join("\n")}\n\n今天热量预算还剩 ${remainingCalories()} 千卡。想认真放纵也可以，我们把它记成一次选择，不把它伪装成“健康餐”。`
+        : "口腹之欲收藏夹还空着。你可以拍照或手动加一个真的想吃的东西，它不会参与日常推荐。"
+    };
+  }
+  state.modal = { type: "indulgenceForm", draft: { name: text.replace(/收藏到口腹之欲|口腹之欲|收藏/g, "").trim() } };
+  return {
+    id: uid("chat"),
+    role: "assistant",
+    createdAt: Date.now(),
+    text: "可以，我打开收藏表单。它会进入口腹之欲，不参与日常推荐，只在你想犒劳自己的时候出现。"
   };
 }
 
@@ -1854,6 +2287,73 @@ function undoMeal(id) {
 
 function addAssistantText(text) {
   state.chat.push({ id: uid("chat"), role: "assistant", createdAt: Date.now(), text });
+}
+
+function fridgeSummary() {
+  if (!state.fridge.length) return "还没有库存，拍照或说一句就能加";
+  return state.fridge.slice(0, 3).map((item) => item.name).join("、") + (state.fridge.length > 3 ? ` 等 ${state.fridge.length} 个` : "");
+}
+
+function dnaSummary() {
+  const cuisines = profileCuisines().slice(0, 2).join("、") || "菜系待补";
+  const tastes = profileTastes().slice(0, 2).join("、") || "口味待补";
+  return `${cuisines} · ${tastes}`;
+}
+
+function indulgences() {
+  return [...state.indulgences, ...indulgenceSeed].filter((item, index, list) => list.findIndex((entry) => entry.id === item.id) === index);
+}
+
+function deleteIndulgence(id) {
+  state.indulgences = state.indulgences.filter((item) => item.id !== id);
+  state.modal = null;
+  showToast("已删除收藏");
+}
+
+function inferIndulgenceEmoji(name = "") {
+  if (/蛋糕|提拉米苏|甜品|奶油|布丁/.test(name)) return "🍰";
+  if (/汉堡|牛肉堡/.test(name)) return "🍔";
+  if (/奶茶|咖啡|饮/.test(name)) return "🥤";
+  if (/面|粉|拉面/.test(name)) return "🍜";
+  if (/烧烤|烤|串/.test(name)) return "🍢";
+  return "💝";
+}
+
+function setupShakeListener() {
+  if (shakeListenerReady) return;
+  shakeListenerReady = true;
+  window.addEventListener("devicemotion", handleDeviceMotion, { passive: true });
+}
+
+function handleDeviceMotion(event) {
+  if (!state.shakeEnabled || state.activeTab !== "archive" || !state.archiveOpen?.inspirations || state.modal) return;
+  const acc = event.accelerationIncludingGravity;
+  if (!acc) return;
+  const strength = Math.abs(acc.x || 0) + Math.abs(acc.y || 0) + Math.abs(acc.z || 0);
+  const now = Date.now();
+  if (strength < 32 || now - lastShakeAt < 3000) return;
+  lastShakeAt = now;
+  triggerShakePick(false);
+}
+
+function triggerShakePick(excludeCurrent = false) {
+  const recipes = filteredRecipes();
+  if (!recipes.length) {
+    state.modal = { type: "shake", empty: true };
+    saveState();
+    render();
+    return;
+  }
+  let pool = recipes.slice(0, 8);
+  if (excludeCurrent && state.modal?.recipeId && pool.length > 1) {
+    pool = pool.filter((recipe) => recipe.id !== state.modal.recipeId);
+  }
+  const recipe = pool[Math.floor(Math.random() * pool.length)] || recipes[0];
+  state.shakeHintSeen = true;
+  state.modal = { type: "shake", recipeId: recipe.id, onlyOne: recipes.length === 1 };
+  if (navigator.vibrate) navigator.vibrate(80);
+  saveState();
+  render();
 }
 
 function createMeal(text) {
@@ -2100,6 +2600,10 @@ function loginForThirtyDays(phone) {
   render();
 }
 
+function loginModeNote() {
+  return "现在是演示验证码。要给朋友真实收短信，需要接入短信服务商，再把验证码发送接口放到云端。";
+}
+
 function logout() {
   const ok = window.confirm("确定退出登录吗？你的本地记录会保留。");
   if (!ok) return;
@@ -2256,4 +2760,10 @@ function installHint() {
   if (deferredInstallPrompt) return "点一下会弹出安装确认";
   if (isIOS()) return "Safari 分享菜单添加到主屏幕";
   return "支持安装的浏览器会显示安装入口";
+}
+
+function installDetail() {
+  if (isStandalonePWA()) return "你现在已经在桌面 App 模式里打开。";
+  if (isIOS()) return "iPhone 必须用 Safari：点底部分享按钮，再选“添加到主屏幕”。微信内置浏览器通常不会给安装权限。";
+  return "安卓 Chrome 如果按钮没反应，点右上角菜单，选“添加到主屏幕”或“安装应用”。";
 }
