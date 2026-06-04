@@ -1068,6 +1068,35 @@ button {
   place-items: center;
   background: var(--insight);
   font-size: 32px;
+  overflow: hidden;
+  position: relative;
+}
+
+.recipe-cover img,
+.recipe-hero img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.recipe-cover span,
+.recipe-hero span {
+  position: absolute;
+  inset: auto 8px 8px auto;
+  width: 30px;
+  height: 30px;
+  border-radius: 999px;
+  display: grid;
+  place-items: center;
+  background: rgba(255, 255, 255, 0.92);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
+  font-size: 17px;
+}
+
+.recipe-cover.emoji-fallback,
+.recipe-hero.emoji-fallback {
+  position: relative;
 }
 
 .recipe-card h3 {
@@ -1585,6 +1614,15 @@ button {
   place-items: center;
   background: var(--insight);
   font-size: 54px;
+  overflow: hidden;
+  position: relative;
+}
+
+.recipe-hero span {
+  width: 42px;
+  height: 42px;
+  inset: auto 12px 12px auto;
+  font-size: 24px;
 }
 
 .detail-body {

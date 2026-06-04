@@ -13,6 +13,8 @@ ARK_API_KEY=你的方舟密钥
 ARK_MODEL=deepseek-v3-2-251201
 ARK_ENDPOINT=https://ark.cn-beijing.volces.com/api/v3/responses
 ARK_WEB_SEARCH=false
+OPENAI_API_KEY=可选；需要语音转文字/图片视觉识别时填写
+OPENAI_TRANSCRIBE_MODEL=gpt-4o-mini-transcribe
 ```
 
 5. 部署成功后，打开 Render 给出的 `https://...onrender.com` 地址。
@@ -33,6 +35,7 @@ npm start
 HOST=0.0.0.0
 PORT=平台自动提供的端口
 ARK_API_KEY=你的方舟密钥
+OPENAI_API_KEY=可选；需要语音转文字/图片视觉识别时填写
 ```
 
 ## 手机添加到桌面

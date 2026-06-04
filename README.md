@@ -53,12 +53,15 @@ ARK_API_KEY=你的方舟密钥
 ARK_MODEL=deepseek-v3-2-251201
 ```
 
-也可以用 OpenAI 作为备用；如果需要上传图片后自动识别食物/热量，建议配置支持视觉输入的 OpenAI 模型：
+也可以用 OpenAI 作为备用；如果需要上传图片后自动识别食物/热量，或让语音稳定转文字，建议配置 OpenAI：
 
 ```text
 OPENAI_API_KEY=你的 OpenAI 密钥
 OPENAI_MODEL=gpt-4.1-mini
+OPENAI_TRANSCRIBE_MODEL=gpt-4o-mini-transcribe
 ```
+
+说明：Ark 文本模型负责普通对话；当前语音转文字和图片视觉识别走 OpenAI 兜底。没有 `OPENAI_API_KEY` 时，语音会提示“还没接密钥”，图片也不会硬猜热量。
 
 启动后可检查：
 
@@ -73,7 +76,7 @@ http://127.0.0.1:4173/api/health
 这是 PWA，不只是静态网页。完整部署需要同时提供：
 
 - 静态文件：`index.html`、`app.js`、`styles.css`、`manifest.webmanifest`、`sw.js`、`assets/icon.svg`
-- 后端接口：`server.mjs` 里的 `/api/chat` 和 `/api/health`
+- 后端接口：`server.mjs` 里的 `/api/chat`、`/api/transcribe` 和 `/api/health`
 - 环境变量：`ARK_API_KEY` 或 `OPENAI_API_KEY`
 
 适合部署到 Render、Railway、Fly.io、VPS 或任何支持 Node 20 的平台。部署命令：

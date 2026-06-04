@@ -1,9 +1,9 @@
-const CACHE_NAME = "zhishifenzi-v13";
+const CACHE_NAME = "zhishifenzi-v14";
 const ASSETS = [
   "./",
   "./index.html",
-  "./styles.css?v=20260604b",
-  "./app.js?v=20260604b",
+  "./styles.css?v=20260604c",
+  "./app.js?v=20260604c",
   "./manifest.webmanifest",
   "./assets/icon.svg"
 ];

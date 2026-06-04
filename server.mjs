@@ -38,11 +38,24 @@ createServer(async (req, res) => {
       }
       return sendJson(res, reply);
     }
+    if (req.method === "POST" && url.pathname === "/api/transcribe") {
+      const body = await readJson(req);
+      let reply;
+      try {
+        reply = await transcribeAudio(body);
+      } catch (error) {
+        console.warn(error?.message || "Transcribe request failed");
+        reply = { text: "", message: "语音转文字暂时不可用。" };
+      }
+      return sendJson(res, reply);
+    }
     if (req.method === "GET" && url.pathname === "/api/health") {
       return sendJson(res, {
         ok: true,
         provider: process.env.ARK_API_KEY ? "ark" : process.env.OPENAI_API_KEY ? "openai" : "local",
         model: process.env.ARK_API_KEY ? arkModel : process.env.OPENAI_API_KEY ? openaiModel : "",
+        transcribe: Boolean(process.env.OPENAI_API_KEY),
+        transcribeModel: process.env.OPENAI_API_KEY ? process.env.OPENAI_TRANSCRIBE_MODEL || "gpt-4o-mini-transcribe" : "",
         pwa: true
       });
     }
@@ -101,6 +114,48 @@ async function callAI(body) {
   if (process.env.ARK_API_KEY) return callArk(body);
   if (process.env.OPENAI_API_KEY) return callOpenAI(body);
   return localFallbackReply(body);
+}
+
+async function transcribeAudio(body) {
+  if (!process.env.OPENAI_API_KEY) {
+    return { text: "", message: "语音转文字还没接密钥；先用键盘输入。" };
+  }
+  const audio = String(body.audio || "");
+  const mimeType = String(body.mimeType || "audio/webm");
+  if (!audio.startsWith("data:audio/")) return { text: "", message: "这段语音没有录到。" };
+
+  const file = dataURLToBlob(audio, mimeType);
+  const form = new FormData();
+  form.append("file", file, `voice.${extensionForMime(mimeType)}`);
+  form.append("model", process.env.OPENAI_TRANSCRIBE_MODEL || "gpt-4o-mini-transcribe");
+  form.append("language", "zh");
+
+  const response = await fetch("https://api.openai.com/v1/audio/transcriptions", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${process.env.OPENAI_API_KEY}` },
+    body: form
+  });
+
+  if (!response.ok) {
+    const text = await response.text();
+    console.warn(`Transcribe ${response.status}: ${text.slice(0, 300)}`);
+    return { text: "", message: "语音转文字暂时失败，先用键盘输入。" };
+  }
+  const data = await response.json();
+  return { text: String(data.text || "").trim() };
+}
+
+function dataURLToBlob(dataURL, mimeType) {
+  const base64 = dataURL.split(",")[1] || "";
+  const bytes = Uint8Array.from(Buffer.from(base64, "base64"));
+  return new Blob([bytes], { type: mimeType });
+}
+
+function extensionForMime(mimeType) {
+  if (mimeType.includes("mp4")) return "mp4";
+  if (mimeType.includes("mpeg")) return "mp3";
+  if (mimeType.includes("wav")) return "wav";
+  return "webm";
 }
 
 async function callArk(body) {

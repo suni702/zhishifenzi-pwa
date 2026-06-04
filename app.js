@@ -1,10 +1,14 @@
 const STORAGE_KEY = "zhishifenzi-pwa-v3";
-const APP_VERSION = "20260604b";
+const APP_VERSION = "20260604c";
 const PUBLIC_APP_URL = "https://zhishifenzi-pwa.pages.dev";
 const AUTH_DAYS = 30;
 let deferredInstallPrompt = null;
 let speechRecognition = null;
 let voiceTranscript = "";
+let voiceRecorder = null;
+let voiceStream = null;
+let voiceChunks = [];
+let voiceFallbackReason = "";
 let lastShakeAt = 0;
 let shakeListenerReady = false;
 let storageWarningShown = false;
@@ -74,6 +78,7 @@ const recipeSeed = [
     id: "onion-egg-rice",
     emoji: "🥘",
     name: "洋葱炒蛋配米饭",
+    image: "https://images.unsplash.com/photo-1525351484163-7529414344d8?auto=format&fit=crop&w=640&q=80",
     time: "10分钟",
     calories: 380,
     tags: ["粤菜", "清淡鲜", "早餐", "午餐", "AI推荐", "常吃"],
@@ -84,6 +89,7 @@ const recipeSeed = [
     id: "shrimp-asparagus",
     emoji: "🍤",
     name: "清炒芦笋虾仁",
+    image: "https://images.unsplash.com/photo-1559847844-5315695dadae?auto=format&fit=crop&w=640&q=80",
     time: "15分钟",
     calories: 320,
     tags: ["粤菜", "清淡鲜", "高蛋白", "午餐", "晚餐", "AI推荐", "新灵感"],
@@ -94,6 +100,7 @@ const recipeSeed = [
     id: "seaweed-egg-soup",
     emoji: "🥣",
     name: "紫菜蛋汤",
+    image: "https://images.unsplash.com/photo-1547592166-23ac45744acd?auto=format&fit=crop&w=640&q=80",
     time: "5分钟",
     calories: 180,
     tags: ["粤菜", "汤羹", "夜宵友好", "解馋", "AI推荐", "常吃"],
@@ -104,6 +111,7 @@ const recipeSeed = [
     id: "teriyaki-salmon",
     emoji: "🐟",
     name: "照烧三文鱼",
+    image: "https://images.unsplash.com/photo-1467003909585-2f8a72700288?auto=format&fit=crop&w=640&q=80",
     time: "20分钟",
     calories: 420,
     tags: ["日料", "高蛋白", "晚餐", "AI推荐", "最近吃过"],
@@ -114,6 +122,7 @@ const recipeSeed = [
     id: "cold-cucumber",
     emoji: "🥒",
     name: "辣酱黄瓜",
+    image: "https://images.unsplash.com/photo-1540420773420-3366772f4999?auto=format&fit=crop&w=640&q=80",
     time: "2分钟",
     calories: 50,
     tags: ["川菜", "解馋专区", "凉拌", "解馋", "我收藏", "新灵感"],
@@ -124,11 +133,89 @@ const recipeSeed = [
     id: "tomato-egg",
     emoji: "🍅",
     name: "番茄鸡蛋汤",
+    image: "https://images.unsplash.com/photo-1604908176997-125f25cc6f3d?auto=format&fit=crop&w=640&q=80",
     time: "8分钟",
     calories: 220,
     tags: ["粤菜", "清淡鲜", "汤羹", "早餐", "晚餐", "AI推荐", "常吃"],
     need: ["番茄", "鸡蛋"],
     steps: ["番茄切块炒出汁。", "加水煮开，淋蛋液。", "盐调味，留一点酸甜感。"]
+  },
+  {
+    id: "chicken-broccoli",
+    emoji: "🥦",
+    name: "西兰花鸡胸碗",
+    image: "https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=640&q=80",
+    time: "18分钟",
+    calories: 390,
+    tags: ["西式", "高蛋白", "午餐", "晚餐", "AI推荐", "新灵感"],
+    need: ["鸡胸", "西兰花", "米饭"],
+    steps: ["鸡胸切片，用盐和黑胡椒腌5分钟。", "西兰花焯水后沥干。", "少油煎熟鸡胸，和西兰花、半碗米饭装碗。"]
+  },
+  {
+    id: "tofu-mushroom",
+    emoji: "🍄",
+    name: "蘑菇豆腐煲",
+    image: "https://images.unsplash.com/photo-1600628421055-4d30de868b8f?auto=format&fit=crop&w=640&q=80",
+    time: "16分钟",
+    calories: 260,
+    tags: ["粤菜", "清淡鲜", "素食", "晚餐", "AI推荐", "新灵感"],
+    need: ["豆腐", "蘑菇", "青菜"],
+    steps: ["蘑菇切片，豆腐切块。", "锅里加水或高汤，放蘑菇和豆腐煮开。", "加青菜，盐和少量生抽调味。"]
+  },
+  {
+    id: "korean-beef-rice",
+    emoji: "🥩",
+    name: "韩式牛肉拌饭",
+    image: "https://images.unsplash.com/photo-1553163147-622ab57be1c7?auto=format&fit=crop&w=640&q=80",
+    time: "20分钟",
+    calories: 520,
+    tags: ["韩式", "午餐", "晚餐", "AI推荐", "最近吃过"],
+    need: ["牛肉", "米饭", "青菜"],
+    steps: ["牛肉薄片快炒。", "青菜焯水或清炒。", "米饭铺底，加牛肉青菜，少量辣酱拌匀。"]
+  },
+  {
+    id: "mediterranean-tuna-salad",
+    emoji: "🥗",
+    name: "金枪鱼地中海沙拉",
+    image: "https://images.unsplash.com/photo-1512621776951-a57141f2eefd?auto=format&fit=crop&w=640&q=80",
+    time: "8分钟",
+    calories: 310,
+    tags: ["地中海", "高蛋白", "午餐", "解馋", "我收藏", "新灵感"],
+    need: ["青菜", "番茄", "鸡蛋"],
+    steps: ["青菜洗净，番茄切块。", "鸡蛋煮熟切开。", "用少量橄榄油、黑胡椒和盐拌匀。"]
+  },
+  {
+    id: "sichuan-eggplant",
+    emoji: "🍆",
+    name: "少油鱼香茄子",
+    image: "https://images.unsplash.com/photo-1564834724105-918b73d1b9e0?auto=format&fit=crop&w=640&q=80",
+    time: "22分钟",
+    calories: 360,
+    tags: ["川菜", "晚餐", "解馋专区", "AI推荐", "新灵感"],
+    need: ["茄子", "猪肉", "大蒜"],
+    steps: ["茄子切条，用微波或蒸锅先软化。", "少油炒蒜末和肉末。", "下茄子，用生抽、醋和一点糖调味。"]
+  },
+  {
+    id: "banana-yogurt-bowl",
+    emoji: "🍌",
+    name: "香蕉酸奶碗",
+    image: "https://images.unsplash.com/photo-1488477181946-6428a0291777?auto=format&fit=crop&w=640&q=80",
+    time: "3分钟",
+    calories: 240,
+    tags: ["西式", "早餐", "解馋", "夜宵友好", "我收藏", "新灵感"],
+    need: ["香蕉", "酸奶", "蓝莓"],
+    steps: ["酸奶倒入碗中。", "香蕉切片，蓝莓洗净。", "想更顶饱可以加一点燕麦。"]
+  },
+  {
+    id: "sweet-potato-milk",
+    emoji: "🍠",
+    name: "红薯牛奶热饮",
+    image: "https://images.unsplash.com/photo-1518977676601-b53f82aba655?auto=format&fit=crop&w=640&q=80",
+    time: "12分钟",
+    calories: 210,
+    tags: ["早餐", "解馋", "夜宵友好", "汤羹", "AI推荐", "新灵感"],
+    need: ["红薯", "牛奶"],
+    steps: ["红薯蒸熟或微波加热。", "压成泥后加热牛奶。", "搅匀即可，甜味不够再加一点点蜂蜜。"]
   }
 ];
 
@@ -173,6 +260,7 @@ const fallbackState = {
     crave: false
   },
   recipeShuffle: 0,
+  recentlyShownRecipeIds: [],
   voiceMode: false,
   voiceRecording: false,
   shakeEnabled: true,
@@ -266,6 +354,9 @@ document.addEventListener("pointerdown", handlePointerDown);
 document.addEventListener("pointerup", handlePointerUp);
 document.addEventListener("pointercancel", handlePointerUp);
 document.addEventListener("visibilitychange", stopVoiceRecognition);
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden && state.voiceRecording) finishVoiceHold(true);
+});
 window.addEventListener("beforeinstallprompt", (event) => {
   event.preventDefault();
   deferredInstallPrompt = event;
@@ -324,7 +415,7 @@ function normalizeState(raw) {
   merged.onboarding = { ...base.onboarding, ...(raw.onboarding || {}) };
   merged.recipeFilters = { ...base.recipeFilters, ...(raw.recipeFilters || {}) };
   merged.archiveOpen = { ...base.archiveOpen, ...(raw.archiveOpen || {}) };
-  for (const key of ["fridge", "meals", "chat", "scans", "inspirations", "indulgences", "memory", "selectedFridgeIds", "feedbackLog", "tempRecipes"]) {
+  for (const key of ["fridge", "meals", "chat", "scans", "inspirations", "indulgences", "memory", "selectedFridgeIds", "feedbackLog", "tempRecipes", "recentlyShownRecipeIds"]) {
     merged[key] = Array.isArray(raw[key]) ? raw[key] : base[key];
   }
   if (!["welcome", "onboarding", "journey", "app"].includes(merged.phase)) merged.phase = "welcome";
@@ -888,7 +979,7 @@ function renderInspirationRoom() {
     </div>
     ${filteredRecipes().length ? `
       <div class="recipe-grid recipe-grid-animated" style="margin-top:12px;">
-        ${filteredRecipes().slice(0, 6).map(renderRecipeCard).join("")}
+        ${visibleRecipes().map(renderRecipeCard).join("")}
       </div>
     ` : `
       <div class="empty-state compact">😕 没有符合条件的灵感
@@ -966,13 +1057,23 @@ function renderRecipeCard(recipe) {
   const frequency = recipeFrequency(recipe);
   return `
     <button class="recipe-card" type="button" data-action="open-recipe" data-id="${attr(recipe.id)}">
-      <div class="recipe-cover">${recipe.emoji}</div>
+      ${renderRecipeImage(recipe, "recipe-cover")}
       <h3>${escapeHTML(recipe.name)}</h3>
       <p>${escapeHTML(recipeScene(recipe))} · ${escapeHTML(recipe.time)}</p>
       <p class="${status.ready ? "ready" : "missing"}">${escapeHTML(status.label)}</p>
       <p>🔥 ${recipe.calories}千卡</p>
       <span class="frequency-tag ${frequency.className}">${escapeHTML(frequency.label)}</span>
     </button>
+  `;
+}
+
+function renderRecipeImage(recipe, className) {
+  if (!recipe.image) return `<div class="${className} emoji-fallback">${recipe.emoji}</div>`;
+  return `
+    <div class="${className}">
+      <img src="${attr(recipe.image)}" alt="${attr(recipe.name)}" loading="lazy" referrerpolicy="no-referrer" onerror="this.style.display='none'" />
+      <span>${recipe.emoji}</span>
+    </div>
   `;
 }
 
@@ -1562,7 +1663,7 @@ function renderRecipeDetail() {
         <div class="modal-header" style="padding:10px 12px;margin:0;position:absolute;right:0;z-index:2;">
           <button class="close-button" type="button" data-action="close-modal">✕</button>
         </div>
-        <div class="recipe-hero">${recipe.emoji}</div>
+        ${renderRecipeImage(recipe, "recipe-hero")}
         <div class="detail-body">
           <h2>${escapeHTML(recipe.name)}</h2>
           <p class="header-meta">⏱ ${escapeHTML(recipe.time)}　🔥 ${recipe.calories}千卡</p>
@@ -1690,8 +1791,9 @@ function handleClick(event) {
     }
   }
   if (action === "shuffle-recipes") {
+    rememberShownRecipes(visibleRecipes().map((recipe) => recipe.id));
     state.recipeShuffle += 1;
-    showToast(`✅找到${filteredRecipes().length}个`);
+    showToast(`换好了，尽量避开刚看过的`);
   }
   if (action === "open-indulgence-form") state.modal = { type: "indulgenceForm", draft: {} };
   if (action === "open-indulgence-camera") {
@@ -1936,7 +2038,8 @@ function handlePointerUp(event) {
 function startVoiceHold() {
   state.voiceRecording = true;
   voiceTranscript = "";
-  startVoiceRecognition();
+  voiceFallbackReason = "";
+  startVoiceCapture();
   saveState();
   render();
 }
@@ -1945,10 +2048,11 @@ function isVoiceCancelGesture(event) {
   return Boolean(voiceStartY && event.clientY && voiceStartY - event.clientY > 50);
 }
 
-function finishVoiceHold(cancelled = false) {
+async function finishVoiceHold(cancelled = false) {
   const text = voiceTranscript.trim();
   state.voiceRecording = false;
   stopVoiceRecognition();
+  const audio = await stopVoiceRecording();
   saveState();
   render();
   if (cancelled) {
@@ -1957,8 +2061,11 @@ function finishVoiceHold(cancelled = false) {
   }
   if (text) {
     sendUserText(text);
+  } else if (audio) {
+    showToast("正在转文字...");
+    transcribeVoice(audio);
   } else {
-    showToast(supportsSpeechRecognition() ? "没听清，可以再按一次" : "这个浏览器不支持语音识别，先用键盘输入");
+    showToast(voiceFallbackReason || "这次语音没录到，可以再按一次");
   }
 }
 
@@ -1966,8 +2073,16 @@ function supportsSpeechRecognition() {
   return Boolean(window.SpeechRecognition || window.webkitSpeechRecognition);
 }
 
+function startVoiceCapture() {
+  const nativeStarted = startVoiceRecognition();
+  startVoiceRecording();
+  if (!nativeStarted && !supportsMediaRecording()) {
+    voiceFallbackReason = "这个浏览器没有开放语音录入，先用键盘输入";
+  }
+}
+
 function startVoiceRecognition() {
-  if (!supportsSpeechRecognition()) return;
+  if (!supportsSpeechRecognition()) return false;
   const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
   speechRecognition = new Recognition();
   speechRecognition.lang = "zh-CN";
@@ -1982,8 +2097,10 @@ function startVoiceRecognition() {
   speechRecognition.onerror = () => {};
   try {
     speechRecognition.start();
+    return true;
   } catch {
     speechRecognition = null;
+    return false;
   }
 }
 
@@ -1993,6 +2110,117 @@ function stopVoiceRecognition() {
     speechRecognition.stop();
   } catch {}
   speechRecognition = null;
+}
+
+function supportsMediaRecording() {
+  return Boolean(navigator.mediaDevices?.getUserMedia && window.MediaRecorder);
+}
+
+async function startVoiceRecording() {
+  if (!supportsMediaRecording()) return false;
+  try {
+    voiceStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    voiceChunks = [];
+    const mimeType = pickAudioMimeType();
+    voiceRecorder = new MediaRecorder(voiceStream, mimeType ? { mimeType } : undefined);
+    voiceRecorder.ondataavailable = (event) => {
+      if (event.data?.size) voiceChunks.push(event.data);
+    };
+    voiceRecorder.start();
+    return true;
+  } catch {
+    voiceFallbackReason = "没拿到麦克风权限，先用键盘输入";
+    stopVoiceTracks();
+    return false;
+  }
+}
+
+function pickAudioMimeType() {
+  const candidates = ["audio/webm;codecs=opus", "audio/webm", "audio/mp4", "audio/mpeg"];
+  return candidates.find((type) => window.MediaRecorder?.isTypeSupported?.(type)) || "";
+}
+
+function stopVoiceRecording() {
+  return new Promise((resolve) => {
+    if (!voiceRecorder) {
+      stopVoiceTracks();
+      resolve(null);
+      return;
+    }
+    const recorder = voiceRecorder;
+    voiceRecorder = null;
+    recorder.onstop = async () => {
+      const blob = new Blob(voiceChunks, { type: recorder.mimeType || "audio/webm" });
+      voiceChunks = [];
+      stopVoiceTracks();
+      if (!blob.size) {
+        resolve(null);
+        return;
+      }
+      resolve({
+        data: await blobToDataURL(blob),
+        mimeType: blob.type || "audio/webm"
+      });
+    };
+    try {
+      if (recorder.state !== "inactive") recorder.stop();
+      else recorder.onstop();
+    } catch {
+      stopVoiceTracks();
+      resolve(null);
+    }
+  });
+}
+
+function stopVoiceTracks() {
+  try {
+    voiceStream?.getTracks?.().forEach((track) => track.stop());
+  } catch {}
+  voiceStream = null;
+}
+
+function blobToDataURL(blob) {
+  return new Promise((resolve) => {
+    const reader = new FileReader();
+    reader.onerror = () => resolve("");
+    reader.onload = () => resolve(String(reader.result || ""));
+    reader.readAsDataURL(blob);
+  });
+}
+
+async function transcribeVoice(audio) {
+  const remote = await tryTranscribeVoice(audio);
+  if (remote?.text) {
+    sendUserText(remote.text);
+    return;
+  }
+  showToast(remote?.message || "语音没转成文字，先用键盘输入");
+}
+
+async function tryTranscribeVoice(audio) {
+  if (!["http:", "https:"].includes(window.location.protocol)) {
+    return { message: "本地文件打开不能转语音，请用公网链接" };
+  }
+  const controller = new AbortController();
+  const timer = window.setTimeout(() => controller.abort(), 12000);
+  try {
+    const response = await fetch("./api/transcribe", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ audio: audio.data, mimeType: audio.mimeType }),
+      signal: controller.signal
+    });
+    if (!response.ok) return { message: "语音转文字接口暂时不可用" };
+    const data = await response.json();
+    return {
+      text: String(data.text || "").trim(),
+      message: data.message || ""
+    };
+  } catch {
+    return { message: "语音转文字超时了，先用键盘输入" };
+  } finally {
+    window.clearTimeout(timer);
+  }
 }
 
 function openFileInput(id) {
@@ -2714,6 +2942,21 @@ function filteredRecipes() {
     recipes = [...recipes].sort((a, b) => ((hashString(a.id) + state.recipeShuffle) % 7) - ((hashString(b.id) + state.recipeShuffle) % 7));
   }
   return [...recipes].sort((a, b) => Number(!recipeStatus(a).ready) - Number(!recipeStatus(b).ready));
+}
+
+function visibleRecipes(limit = 6) {
+  const recipes = filteredRecipes();
+  if (recipes.length <= limit) return recipes;
+  const recent = new Set(state.recentlyShownRecipeIds || []);
+  const unseen = recipes.filter((recipe) => !recent.has(recipe.id));
+  const pool = unseen.length >= limit ? unseen : [...unseen, ...recipes.filter((recipe) => recent.has(recipe.id))];
+  const start = (state.recipeShuffle * limit) % Math.max(pool.length, 1);
+  const rotated = [...pool.slice(start), ...pool.slice(0, start)];
+  return rotated.slice(0, limit);
+}
+
+function rememberShownRecipes(ids) {
+  state.recentlyShownRecipeIds = unique([...(ids || []), ...(state.recentlyShownRecipeIds || [])]).slice(0, 18);
 }
 
 function filterSummary() {
