@@ -99,6 +99,20 @@ button {
   line-height: 1.2;
 }
 
+.header-title-button {
+  min-width: 0;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text);
+  padding: 4px 6px 4px 0;
+  text-align: left;
+}
+
+.header-title-button:active {
+  background: var(--soft);
+}
+
 .header-meta {
   color: var(--muted);
   font-size: 13px;
@@ -521,10 +535,10 @@ button {
 }
 
 .bubble {
-  max-width: 76%;
+  max-width: 78%;
   border-radius: 16px;
-  padding: 8px 11px;
-  line-height: 1.46;
+  padding: 7px 10px;
+  line-height: 1.42;
   font-size: 14px;
   white-space: normal;
   box-shadow: var(--shadow);
@@ -614,7 +628,7 @@ button {
 }
 
 .assistant-composer.voice-composer {
-  grid-template-columns: 42px minmax(0, 1fr) 42px 42px;
+  grid-template-columns: 42px minmax(0, 1fr) 42px;
 }
 
 .hold-voice-button {
@@ -624,6 +638,8 @@ button {
   background: #f8f8f6;
   color: var(--primary);
   font-weight: 900;
+  touch-action: none;
+  user-select: none;
 }
 
 .hold-voice-button.recording {
@@ -643,6 +659,21 @@ button {
   background: rgba(44, 44, 44, 0.86);
   font-size: 13px;
   font-weight: 800;
+}
+
+.update-banner {
+  position: absolute;
+  left: 14px;
+  right: 14px;
+  bottom: calc(66px + env(safe-area-inset-bottom));
+  z-index: 30;
+  min-height: 42px;
+  border: 0;
+  border-radius: 12px;
+  color: #fff;
+  background: var(--primary);
+  box-shadow: 0 10px 30px rgba(44, 44, 44, 0.18);
+  font-weight: 900;
 }
 
 .tool-icon,
@@ -759,6 +790,10 @@ button {
   text-align: left;
 }
 
+.archive-room.open .archive-room-head {
+  background: #fbfcfa;
+}
+
 .archive-room-head strong {
   display: block;
   font-size: 16px;
@@ -792,6 +827,18 @@ button {
   padding: 0 12px 12px;
 }
 
+.room-open-page {
+  width: 100%;
+  min-height: 34px;
+  margin: 0 0 10px;
+  border: 1px solid rgba(125, 155, 118, 0.25);
+  border-radius: 8px;
+  background: var(--soft);
+  color: var(--primary);
+  font-size: 13px;
+  font-weight: 800;
+}
+
 .compact-title {
   margin-bottom: 8px;
 }
@@ -800,6 +847,17 @@ button {
   margin: 0 0 10px;
   color: var(--muted);
   font-size: 13px;
+}
+
+.motion-permission {
+  width: 100%;
+  min-height: 36px;
+  border: 0;
+  border-radius: 8px;
+  margin-bottom: 10px;
+  color: #fff;
+  background: var(--primary);
+  font-weight: 800;
 }
 
 .flat-card {
@@ -1319,6 +1377,30 @@ button {
   line-height: 1.45;
 }
 
+.install-guide {
+  display: grid;
+  gap: 12px;
+}
+
+.install-guide strong {
+  font-size: 16px;
+}
+
+.install-guide p {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.55;
+}
+
+.install-url {
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 13px;
+  word-break: break-all;
+}
+
 .stats-card,
 .list-card,
 .panel-card {
@@ -1625,7 +1707,7 @@ button {
   }
 
   .bubble {
-    max-width: 80%;
+    max-width: 82%;
   }
 
   .assistant-composer {
@@ -1635,7 +1717,7 @@ button {
   }
 
   .assistant-composer.voice-composer {
-    grid-template-columns: 38px minmax(0, 1fr) 36px 36px;
+    grid-template-columns: 38px minmax(0, 1fr) 36px;
   }
 
   .tool-icon {
