@@ -1,5 +1,5 @@
 const STORAGE_KEY = "zhishifenzi-pwa-v3";
-const APP_VERSION = "20260604c";
+const APP_VERSION = "20260607a";
 const PUBLIC_APP_URL = "https://zhishifenzi-pwa.pages.dev";
 const AUTH_DAYS = 30;
 let deferredInstallPrompt = null;
@@ -2351,13 +2351,14 @@ function ensureChat() {
 }
 
 function sendUserText(text) {
+  const followupImage = getFollowupImage(text);
   state.chat.push({ id: uid("chat"), role: "user", createdAt: Date.now(), text });
-  const instantReply = buildLocalReply(text);
+  const instantReply = followupImage ? imageFollowupLocalReply() : buildLocalReply(text);
   const placeholderId = uid("chat");
   state.chat.push({ ...instantReply, id: placeholderId, fastLocal: true });
   saveState();
   render();
-  resolveAssistantReply({ text, image: "" }, placeholderId);
+  resolveAssistantReply({ text, image: followupImage }, placeholderId);
 }
 
 function sendUserImage(image) {
@@ -2407,7 +2408,7 @@ async function tryRemoteReply(payload) {
   }
   if (localStorage.getItem("zhishifenzi-ai-enabled") === "false") return "";
   const controller = new AbortController();
-  const timer = window.setTimeout(() => controller.abort(), 5500);
+  const timer = window.setTimeout(() => controller.abort(), payload.image ? 8000 : 7000);
   try {
     const response = await fetch("./api/chat", {
       method: "POST",
@@ -2444,8 +2445,6 @@ async function tryRemoteReply(payload) {
 
 function decorateRemoteReply(remote, payload) {
   if (!payload.image) return remote.text;
-  if (remote.aiStatus === "vision_ok") return `已看图：\n${remote.text}`;
-  if (remote.aiStatus === "vision_unavailable") return `图片识别未接入视觉模型：\n${remote.text}`;
   return remote.text;
 }
 
@@ -2453,7 +2452,38 @@ function localImageReplyText() {
   if (!["http:", "https:"].includes(window.location.protocol)) {
     return "我收到图片了，但你现在是直接打开本地文件，图片不会送到云端 AI 识别。\n\n你可以用公网链接或本地服务地址打开；现在先告诉我：这是食物、冰箱，还是小票？如果是食物，再补一句大概几人份。";
   }
-  return "我收到图片了。现在先不乱猜热量。\n\n如果云端视觉模型能看懂，我会给范围；如果看不清，我只问一个确认问题：这是食物、冰箱，还是订单截图？";
+  return "我在看这张图。\n\n看得清的话我会直接判断；如果只能看出大概，我会明确说不确定，不会硬编热量。";
+}
+
+function imageFollowupLocalReply() {
+  return {
+    id: uid("chat"),
+    role: "assistant",
+    createdAt: Date.now(),
+    text: "我继续看刚才那张图。\n\n如果能看清，我会直接说它像什么、能怎么吃或大概热量；如果看不清，我只问一个确认问题。"
+  };
+}
+
+function getFollowupImage(text) {
+  const image = getRecentUserImage();
+  if (!image) return "";
+  return shouldUseRecentImage(text) ? image : "";
+}
+
+function getRecentUserImage() {
+  const now = Date.now();
+  const recent = [...state.chat].reverse().find((item) =>
+    item.role === "user" && item.image && now - item.createdAt < 30 * 60 * 1000
+  );
+  return recent?.image || "";
+}
+
+function shouldUseRecentImage(text) {
+  const clean = String(text || "").trim();
+  if (!clean) return false;
+  if (/^[？?。.!！…\s]{1,8}$/.test(clean)) return true;
+  if (/图片|图里|看图|看一下|看得出|看出来|识别|你自己识别|这个|它|这是什么|这是啥|能做啥|热量|多少卡|卡路里/.test(clean)) return true;
+  return false;
 }
 
 function buildLocalReply(text) {
@@ -2471,7 +2501,7 @@ function buildLocalReply(text) {
     id: uid("chat"),
     role: "assistant",
     createdAt: Date.now(),
-    text: "我先把这句话当成生活线索记下。\n\n为了尽量一次问完：它更像饮食记录、冰箱库存、想吃灵感，还是一次复盘？"
+    text: "我有点没接上你的意思。\n\n你直接说我该做哪件事就行：记录这一顿、看图估热量、更新冰箱，还是帮你决定吃什么？"
   };
 }
 
