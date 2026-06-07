@@ -18,7 +18,7 @@ export async function onRequestPost({ request, env }) {
     form.append("model", env.OPENAI_TRANSCRIBE_MODEL || "gpt-4o-mini-transcribe");
     form.append("language", "zh");
 
-    const response = await fetch("https://api.openai.com/v1/audio/transcriptions", {
+    const response = await fetch(`${openAIBaseURL(env)}/audio/transcriptions`, {
       method: "POST",
       headers: { Authorization: `Bearer ${env.OPENAI_API_KEY}` },
       body: form
@@ -35,6 +35,10 @@ export async function onRequestPost({ request, env }) {
     console.warn(error?.message || "Transcribe request failed");
     return Response.json({ text: "", message: "语音转文字暂时不可用。" });
   }
+}
+
+function openAIBaseURL(env) {
+  return String(env.OPENAI_BASE_URL || "https://api.openai.com/v1").replace(/\/+$/, "");
 }
 
 function dataURLToFile(dataURL, mimeType) {

@@ -14,6 +14,7 @@ ARK_MODEL=deepseek-v3-2-251201
 ARK_ENDPOINT=https://ark.cn-beijing.volces.com/api/v3/responses
 ARK_WEB_SEARCH=false
 OPENAI_API_KEY=可选；需要语音转文字/图片视觉识别时填写
+OPENAI_BASE_URL=https://api.openai.com/v1
 OPENAI_TRANSCRIBE_MODEL=gpt-4o-mini-transcribe
 ```
 
@@ -36,6 +37,7 @@ HOST=0.0.0.0
 PORT=平台自动提供的端口
 ARK_API_KEY=你的方舟密钥
 OPENAI_API_KEY=可选；需要语音转文字/图片视觉识别时填写
+OPENAI_BASE_URL=https://api.openai.com/v1
 ```
 
 ## 手机添加到桌面

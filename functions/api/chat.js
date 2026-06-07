@@ -59,10 +59,18 @@ async function callArk(body, env) {
 }
 
 async function callOpenAI(body, env) {
-  const content = [{ type: "input_text", text: buildPrompt(body) }];
+  const prompt = buildPrompt(body);
+  const baseURL = openAIBaseURL(env);
+  const reply = await callOpenAIResponses(body, env, prompt, baseURL);
+  if (reply) return reply;
+  return callOpenAIChatCompletions(body, env, prompt, baseURL);
+}
+
+async function callOpenAIResponses(body, env, prompt, baseURL) {
+  const content = [{ type: "input_text", text: prompt }];
   if (body.image) content.push({ type: "input_image", image_url: body.image, detail: "auto" });
 
-  const response = await fetch("https://api.openai.com/v1/responses", {
+  const response = await fetch(`${baseURL}/responses`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -77,11 +85,43 @@ async function callOpenAI(body, env) {
   if (!response.ok) {
     const text = await response.text();
     console.warn(`OpenAI ${response.status}: ${text.slice(0, 300)}`);
-    return localFallbackReply(body);
+    return null;
   }
 
   const data = await response.json();
   return { reply: extractText(data) || "我看到了，但这次没有生成明确回复。", aiStatus: body.image ? "vision_ok" : "ok" };
+}
+
+async function callOpenAIChatCompletions(body, env, prompt, baseURL) {
+  const content = body.image
+    ? [
+        { type: "text", text: prompt },
+        { type: "image_url", image_url: { url: body.image } }
+      ]
+    : prompt;
+  const response = await fetch(`${baseURL}/chat/completions`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${env.OPENAI_API_KEY}`
+    },
+    body: JSON.stringify({
+      model: env.OPENAI_MODEL || "gpt-4.1-mini",
+      messages: [{ role: "user", content }]
+    })
+  });
+
+  if (!response.ok) {
+    const text = await response.text();
+    console.warn(`OpenAI chat ${response.status}: ${text.slice(0, 300)}`);
+    return localFallbackReply(body);
+  }
+  const data = await response.json();
+  return { reply: extractText(data) || "我看到了，但这次没有生成明确回复。", aiStatus: body.image ? "vision_ok" : "ok" };
+}
+
+function openAIBaseURL(env) {
+  return String(env.OPENAI_BASE_URL || "https://api.openai.com/v1").replace(/\/+$/, "");
 }
 
 function localFallbackReply(body) {

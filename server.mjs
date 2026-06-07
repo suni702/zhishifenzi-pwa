@@ -9,6 +9,7 @@ loadLocalEnv();
 const port = Number(process.env.PORT || 8787);
 const host = process.env.HOST || "127.0.0.1";
 const openaiModel = process.env.OPENAI_MODEL || "gpt-4.1-mini";
+const openaiBaseURL = (process.env.OPENAI_BASE_URL || "https://api.openai.com/v1").replace(/\/+$/, "");
 const arkModel = process.env.ARK_MODEL || "deepseek-v3-2-251201";
 const arkEndpoint = process.env.ARK_ENDPOINT || "https://ark.cn-beijing.volces.com/api/v3/responses";
 const arkWebSearch = process.env.ARK_WEB_SEARCH === "true";
@@ -56,6 +57,7 @@ createServer(async (req, res) => {
         model: process.env.ARK_API_KEY ? arkModel : process.env.OPENAI_API_KEY ? openaiModel : "",
         transcribe: Boolean(process.env.OPENAI_API_KEY),
         transcribeModel: process.env.OPENAI_API_KEY ? process.env.OPENAI_TRANSCRIBE_MODEL || "gpt-4o-mini-transcribe" : "",
+        openaiBaseUrl: openaiBaseURL,
         pwa: true
       });
     }
@@ -130,7 +132,7 @@ async function transcribeAudio(body) {
   form.append("model", process.env.OPENAI_TRANSCRIBE_MODEL || "gpt-4o-mini-transcribe");
   form.append("language", "zh");
 
-  const response = await fetch("https://api.openai.com/v1/audio/transcriptions", {
+  const response = await fetch(`${openaiBaseURL}/audio/transcriptions`, {
     method: "POST",
     headers: { Authorization: `Bearer ${process.env.OPENAI_API_KEY}` },
     body: form
@@ -199,10 +201,17 @@ async function callArk(body) {
 }
 
 async function callOpenAI(body) {
-  const content = [{ type: "input_text", text: buildPrompt(body) }];
+  const prompt = buildPrompt(body);
+  const reply = await callOpenAIResponses(body, prompt);
+  if (reply) return reply;
+  return callOpenAIChatCompletions(body, prompt);
+}
+
+async function callOpenAIResponses(body, prompt) {
+  const content = [{ type: "input_text", text: prompt }];
   if (body.image) content.push({ type: "input_image", image_url: body.image, detail: "auto" });
 
-  const response = await fetch("https://api.openai.com/v1/responses", {
+  const response = await fetch(`${openaiBaseURL}/responses`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -217,6 +226,35 @@ async function callOpenAI(body) {
   if (!response.ok) {
     const text = await response.text();
     console.warn(`OpenAI ${response.status}: ${text.slice(0, 300)}`);
+    return null;
+  }
+
+  const data = await response.json();
+  return { reply: extractText(data) || "我看到了，但这次没有生成明确回复。", aiStatus: body.image ? "vision_ok" : "ok" };
+}
+
+async function callOpenAIChatCompletions(body, prompt) {
+  const content = body.image
+    ? [
+        { type: "text", text: prompt },
+        { type: "image_url", image_url: { url: body.image } }
+      ]
+    : prompt;
+  const response = await fetch(`${openaiBaseURL}/chat/completions`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${process.env.OPENAI_API_KEY}`
+    },
+    body: JSON.stringify({
+      model: openaiModel,
+      messages: [{ role: "user", content }]
+    })
+  });
+
+  if (!response.ok) {
+    const text = await response.text();
+    console.warn(`OpenAI chat ${response.status}: ${text.slice(0, 300)}`);
     return localFallbackReply(body);
   }
 

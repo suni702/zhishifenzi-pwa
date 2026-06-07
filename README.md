@@ -57,6 +57,7 @@ ARK_MODEL=deepseek-v3-2-251201
 
 ```text
 OPENAI_API_KEY=你的 OpenAI 密钥
+OPENAI_BASE_URL=https://api.openai.com/v1
 OPENAI_MODEL=gpt-4.1-mini
 OPENAI_TRANSCRIBE_MODEL=gpt-4o-mini-transcribe
 ```
